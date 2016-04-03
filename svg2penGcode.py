@@ -44,6 +44,11 @@ def generatePathes(borderNodes, penRadius, minPenRadius, maxIterations=2, includ
         return [l] + offsets
     else:
         return offsets
+def pathLength(path):
+    length = 0
+    for ct in range(len(path)-1):
+        length += math.sqrt( (path[ct+1][0] -  path[ct][0])**2.0 + (path[ct+1][1] -  path[ct][1])**2.0 )
+    return length
 def genGCode(path, zDraw, zMove, xOffset, yOffset, zOffset):
     code = []
     code += 'G1 Z'+formatVal(zMove + zOffset)+';\n'
@@ -178,8 +183,8 @@ def main(argv):
             aggL = 0
             length = p.length()
             numCheck = int(length/penRadius*9.9)
-            if length > 0:
-                checkPoints = [p.point(cl) for cl in np.arange(0, 1, 1.0/numCheck)]
+            if length > 1:
+                checkPoints = [p.point(cl) for cl in np.arange(0, 0.999, 1.0/numCheck)]
                 minX = min([minX, min([p.real for p in checkPoints ])])
                 minY = min([minY, min([p.imag for p in checkPoints ])])
                 maxX = max([maxX, max([p.real for p in checkPoints ])])
@@ -207,7 +212,7 @@ def main(argv):
         if len(nodesGroup) > 1:
             maxIter = 1
         else:
-            maxIter = 6
+            maxIter = 50
         for nodes in nodesGroup:
             offsets = generatePathes(nodes, penRadius, maxIterations=maxIter, includeBorder=includeBorder, minPenRadius=minPenRadius)
             offsets = [offsets[0]] + offsets
@@ -215,7 +220,8 @@ def main(argv):
                 try:
                     x,y = offset.xy
                     nodes = zip(x, y)
-                    code += genGCode(nodes, zDraw, zMove, xOffset, yOffset, zOffset)
+                    if pathLength(nodes) > 1:
+                        code += genGCode(nodes, zDraw, zMove, xOffset, yOffset, zOffset)
                 except:
                     #print offset
                     pass
