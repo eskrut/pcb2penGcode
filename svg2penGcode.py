@@ -13,51 +13,88 @@ from pprint import pprint
 
 def formatVal(val, f="%0.2f"):
     return (f % (val))
-def generateInfil(lineRing, penRadius, minPenRadius, maxIterations, side='right'):
+def generateInfil(lineRing, penRadius, minPenRadius, maxIterations, side='left', join_style=2):
     if penRadius < minPenRadius:
         penRadius = minPenRadius
     if maxIterations == 0:
         return []
     try:
-        offset = lineRing.parallel_offset(penRadius, side, join_style=2)
+        offset = lineRing.parallel_offset(penRadius, side, join_style=join_style, mitre_limit=10)
     except:
         return []
     parts = hasattr(offset, 'geoms') and offset or [offset]
-    length = 0
+    # Check if infil generated in right side. If not bounds of infil will be wider than bounds of original
+    minX = minY = 1e10
+    maxX = maxY = -1e10
     for p in parts:
-        length += p.length
-    if length > lineRing.length:
         try:
-            offset = lineRing.parallel_offset(penRadius, 'left', join_style=2)
+            x, y = p.xy
+            minX = min(minX, min(x))
+            minY = min(minY, min(y))
+            maxX = max(maxX, max(x))
+            maxY = max(maxY, max(y))
         except:
+            # print(p)
             pass
-        parts = hasattr(offset, 'geoms') and offset or [offset]
+    try:
+        ox, oy = lineRing.xy
+        if minX < min(ox) or minY < min(oy) or maxX > max(ox) or maxY > max(oy):
+            # Make with right side
+            try:
+                offset = lineRing.parallel_offset(penRadius, 'right', join_style=join_style, mitre_limit=10)
+            except:
+                pass
+            parts = hasattr(offset, 'geoms') and offset or [offset]
+    except:
+        pass
+    # for i in range(len(parts)):
+    #     try:
+    #         x,y = parts[i].xy
+    #         nodes = zip(x, y)
+    #         parts[i] = LinearRing(nodes)
+    #     except:
+    #         pass
     subparts = []
     for p in parts:
         subparts.append(p)
-        subparts += generateInfil(p, penRadius/1.8, minPenRadius, maxIterations=maxIterations-1, side='right')
+        subparts += generateInfil(p, penRadius/2.5, minPenRadius, maxIterations=maxIterations-1, side='left',join_style=join_style)
     return subparts
-def generatePathes(borderNodes, penRadius, minPenRadius, maxIterations=2, includeBorder=False):
+def generatePathes(borderNodes, penRadius, minPenRadius, maxIterations=2, includeBorder=False, insideFirst=False, jointStyle=2):
     l = LinearRing(borderNodes)
-    offsets = generateInfil(l, penRadius, minPenRadius, maxIterations)
+    offsets = generateInfil(l, penRadius, minPenRadius, maxIterations,join_style=jointStyle)
+    if len(offsets) == 0:
+        raise RuntimeError("No infil generated (")
     if includeBorder:
-        return [l] + offsets
+        paths = [l] + offsets
     else:
-        return offsets
+        paths =  offsets
+    if insideFirst:
+        return list(reversed(paths))
+    else:
+        return paths
 def pathLength(path):
     length = 0
     for ct in range(len(path)-1):
         length += math.sqrt( (path[ct+1][0] -  path[ct][0])**2.0 + (path[ct+1][1] -  path[ct][1])**2.0 )
     return length
-def genGCode(path, zDraw, zMove, xOffset, yOffset, zOffset):
+def genGCode(path, zDraw, zMove, xOffset, yOffset, zOffset, drawSpeed, moveSpeed, zMoveSpeed):
     code = []
-    code += 'G1 Z'+formatVal(zMove + zOffset)+';\n'
-    code += 'G1 X'+formatVal(path[0][0]+xOffset)+' Y'+formatVal(path[0][1]+yOffset)+';\n'
-    code += 'G1 Z'+formatVal(zDraw + zOffset)+';\n'
+    #code += 'G1 Z'+formatVal(zMove + zOffset)+';\n'
+    code += '\n;****************************************************************\n'
+    code += 'G1 X'+formatVal(path[0][0]+xOffset)+' Y'+formatVal(path[0][1]+yOffset)+' F'+formatVal(moveSpeed)+';\n'
+    code += 'G1 Z'+formatVal(zDraw + zOffset)+' F'+formatVal(zMoveSpeed)+';\nG1 F' + formatVal(drawSpeed) + ';\n'
     for p in path[1:]:
         code += 'G1 X'+formatVal(p[0]+xOffset)+' Y'+formatVal(p[1]+yOffset)+';\n'
     code += 'G1 Z'+formatVal(zMove + zOffset)+';\n'
     return code
+def printProgress (iteration, total, prefix = '', suffix = '', decimals = 2, barLength = 100):
+    filledLength    = int(round(barLength * iteration / float(total)))
+    percents        = round(100.00 * (iteration / float(total)), decimals)
+    bar             = '#' * filledLength + '-' * (barLength - filledLength)
+    sys.stdout.write('%s [%s] %s%s %s\r' % (prefix, bar, percents, '%', suffix)),
+    sys.stdout.flush()
+    if iteration == total:
+        print("\n")
 
 
 def main(argv):
@@ -65,18 +102,33 @@ def main(argv):
     zMove = 1.0
     xOffset = 0.0
     yOffset = 0.0
-    zOffset = 0.0
+    zOffset = 1.0
+    zApproach = 10
+    zRetreat = 10
     userScale = 1.0
     feed = 500
+    moveFeed = 1000
+    zMoveFeed = 120
     penRadius = 0.19
     minPenRadius = 0.1
     includeBorder = False
+    numRepeatFirst = 3
     makeSetupFile = False
+    insideFirst = False
+    #Possible 1, 2, 3
+    jointStyle = 1;
+    maxInfilIterations = 50;
     #-s 0.3533 -x 20 -y 20 -z 4.5 -f 500
 
     helpString = 'svg2penGcode.py <inputfile>'
     try:
-        opts, args = getopt.getopt(argv,"hp:d:m:x:y:z:s:f:b",["help", "pen-radius=", "draw=", "move=", "x-offset=", "y-offset", "z-offset", "scale=", "feed=", "border", "setup"])
+        opts, args = getopt.getopt(argv,"hp:d:m:x:y:z:s:f:b",["help",
+            "pen-radius=", "min-pen-radius=", "draw=", "move=",
+            "x-offset=", "y-offset", "z-offset", "scale=",
+            "feed=", "feed-move=",
+            "border", "repeat=", "inside-first",
+            "join-style=", "max-iterations=",
+            "setup"])
     except getopt.GetoptError:
         print helpString
         sys.exit(2)
@@ -86,6 +138,8 @@ def main(argv):
             sys.exit(0)
         elif opt in ("-p", "--pen-radius"):
             penRadius = float(arg)
+        elif opt in ("--min-pen-radius"):
+            minPenRadius = float(arg)
         elif opt in ("-d", "--draw"):
             zDraw = float(arg)
         elif opt in ("-m",   "--move"):
@@ -100,8 +154,18 @@ def main(argv):
             userScale = float(arg)
         elif opt in ("-f", "--feed"):
             feed = float(arg)
+        elif opt in ("--feed-move"):
+            feedMove = float(arg)
         elif opt in ("-b", "--border"):
             includeBorder = True
+        elif opt in ("--repeat"):
+            numRepeatFirst = int(arg)
+        elif opt in ("--inside-first"):
+            insideFirst = True
+        elif opt in ("--join-style"):
+            jointStyle = int(arg)
+        elif opt in ("--max-iterations"):
+            maxInfilIterations = int(arg)
         elif opt in ("--setup"):
             makeSetupFile = True
     
@@ -172,7 +236,9 @@ def main(argv):
     minY = 1e10
     maxX = -1e10
     maxY = -1e10
+    count = 0
     for cPaths in correctedPaths:
+        printProgress(count, len(correctedPaths), prefix='Parsing')
         paths.append([])
         pathsNodes.append([])
         for c in cPaths:
@@ -196,6 +262,8 @@ def main(argv):
                         pathsNodes[-1][-1].append([checkPoints[index].real, checkPoints[index].imag])
                         aggL = 0
                     index += 1
+        count += 1
+    printProgress(1, 1, prefix='Parsing', suffix='Done')
     tmp = pathsNodes
     pathsNodes = []
     for pp in tmp:
@@ -206,45 +274,51 @@ def main(argv):
                 pathsNodes[-1][-1].append([n[0] - minX, n[1] - minY])
 
     code = []
-    code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\nG1 F' + formatVal(feed) + ';\n')
-    code.append('G1 Z' + formatVal(zMove + zOffset) + ';\n')
+    code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\n')
+    code.append('G1 Z' + formatVal(zMove + zOffset + zApproach) + ';\n')
+    count = 0
     for nodesGroup in pathsNodes:
+        printProgress(count, len(pathsNodes), prefix='Generating')
         if len(nodesGroup) > 1:
             maxIter = 1
         else:
-            maxIter = 50
+            maxIter = maxInfilIterations
         for nodes in nodesGroup:
-            offsets = generatePathes(nodes, penRadius, maxIterations=maxIter, includeBorder=includeBorder, minPenRadius=minPenRadius)
-            offsets = [offsets[0]] + offsets
+            offsets = generatePathes(nodes, penRadius, maxIterations=maxIter, includeBorder=includeBorder, minPenRadius=minPenRadius, insideFirst=insideFirst, jointStyle=jointStyle)
+            if len(offsets) > numRepeatFirst:
+                offsets = [offsets[:numRepeatFirst]] + offsets
+            else:
+                offsets = offsets + offsets
             for offset in offsets:
                 try:
                     x,y = offset.xy
                     nodes = zip(x, y)
                     if pathLength(nodes) > 1:
-                        code += genGCode(nodes, zDraw, zMove, xOffset, yOffset, zOffset)
+                        code += genGCode(nodes, zDraw, zMove, xOffset, yOffset, zOffset, feed, moveFeed, zMoveFeed)
                 except:
-                    #print offset
+                    # print offset
                     pass
-    code.append('G1 Z' + formatVal(zMove + zOffset + 3) + ';\n')
+        count += 1
+    code.append('G1 Z' + formatVal(zMove + zOffset + zRetreat) + ';\n')
     code.append('G28 X0;\n')
-    #code.append('G1 Y180;\n')
-    code.append('M84;\n;\n;\n\n')
+    code.append('M84;\n;')
     f = open(fileName+'.gcode', 'w')
     f.writelines(code)
     f.close()
+    printProgress(1, 1, prefix='Generating', suffix='Done')
     print 'PCB size ', formatVal(maxX - minX, f="%0.f"), formatVal(maxY - minY, f="%0.f")
 
     if makeSetupFile:
         #Gen code for point pen to minX minY position with z offset 
         code = []
-        code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\nG1 F' + formatVal(feed) + ';\n')
-        code.append('G1 Z' + formatVal(zMove + zOffset + 3) + ';\n')
-        code.append('G1 X'+formatVal(xOffset)+' Y'+formatVal(yOffset)+';\n')
+        code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\n')
+        code.append('G1 Z' + formatVal(zMove + zOffset + zApproach) + ';\n')
+        code.append('G1 X'+formatVal(xOffset)+' Y'+formatVal(yOffset)+' F'+formatVal(moveFeed)+';\n')
         #This privents strange movement as the end
         code.append('G1 X'+formatVal(xOffset+0.1)+' Y'+formatVal(yOffset+0.1)+';\n')
         code.append('G1 X'+formatVal(xOffset)+' Y'+formatVal(yOffset)+';\n')
         code.append('G1 Z' + formatVal(zOffset) + ';\n')
-        code.append('M84;\n;\n;\n\n')
+        code.append('M84;\n;')
         f = open(fileName+'.setup.gcode', 'w')
         f.writelines(code)
         f.close()
@@ -260,23 +334,22 @@ def main(argv):
         cornerNodes.append([])
         cornerNodes[-1].append([[0.0 + stroke, (maxY-minY)], [0.0, (maxY-minY)], [0.0, (maxY-minY) - stroke]])
         code = []
-        code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\nG1 F' + formatVal(feed) + ';\n')
-        code.append('G1 Z' + formatVal(zMove + zOffset) + ';\n')
+        code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\n')
+        code.append('G1 Z' + formatVal(zMove + zOffset + zApproach) + ';\n')
         for nodesGroup in cornerNodes:
             maxIter = 1
             for nodes in nodesGroup:
-                code += genGCode(nodes, zDraw, zMove, xOffset, yOffset, zOffset)
-        code.append('G1 Z' + formatVal(zMove + zOffset + 3) + ';\n')
+                code += genGCode(nodes, zDraw, zMove, xOffset, yOffset, zOffset, feed, moveFeed, zMoveFeed)
+        code.append('G1 Z' + formatVal(zMove + zOffset + zRetreat) + ';\n')
         code.append('G28 X0;\n')
-        #code.append('G1 Y180;\n')
-        code.append('M84;\n;\n;\n\n')
+        code.append('M84;\n;')
         f = open(fileName+'.corners.gcode', 'w')
         f.writelines(code)
         f.close()
         #Gen code for draw borders
         code = []
-        code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\nG1 F' + formatVal(feed) + ';\n')
-        code.append('G1 Z' + formatVal(zMove + zOffset) + ';\n')
+        code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\n')
+        code.append('G1 Z' + formatVal(zMove + zOffset + zApproach) + ';\n')
         for nodesGroup in [pathsNodes[0]]:
             maxIter = 1
             for nodes in nodesGroup:
@@ -286,14 +359,13 @@ def main(argv):
                     try:
                         x,y = offset.xy
                         nodes = zip(x, y)
-                        code += genGCode(nodes, zDraw, zMove, xOffset, yOffset, zOffset)
+                        code += genGCode(nodes, zDraw, zMove, xOffset, yOffset, zOffset, feed, moveFeed, zMoveFeed)
                     except:
                         pass
                         #print offset
-        code.append('G1 Z' + formatVal(zMove + zOffset + 3) + ';\n')
+        code.append('G1 Z' + formatVal(zMove + zOffset + zRetreat) + ';\n')
         code.append('G28 X0;\n')
-        #code.append('G1 Y180;\n')
-        code.append('M84;\n;\n;\n\n')
+        code.append('M84;\n;')
         f = open(fileName+'.border.gcode', 'w')
         f.writelines(code)
         f.close()
