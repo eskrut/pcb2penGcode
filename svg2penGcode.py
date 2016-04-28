@@ -118,13 +118,14 @@ def main(argv):
     #Possible 1, 2, 3
     jointStyle = 1;
     maxInfilIterations = 50;
+    mirrored = False
     #-s 0.3533 -x 20 -y 20 -z 4.5 -f 500
 
-    helpString = 'svg2penGcode.py <inputfile>'
+    helpString = 'svg2penGcode.py [options] <inputfile[s]>'
     try:
         opts, args = getopt.getopt(argv,"hp:d:m:x:y:z:s:f:b",["help",
             "pen-radius=", "min-pen-radius=", "draw=", "move=",
-            "x-offset=", "y-offset", "z-offset", "scale=",
+            "x-offset=", "y-offset=", "z-offset=", "scale=", "mirrored",
             "feed=", "feed-move=",
             "border", "repeat=", "inside-first",
             "join-style=", "max-iterations=",
@@ -142,7 +143,7 @@ def main(argv):
             minPenRadius = float(arg)
         elif opt in ("-d", "--draw"):
             zDraw = float(arg)
-        elif opt in ("-m",   "--move"):
+        elif opt in ("-m", "--move"):
             zMove = float(arg)
         elif opt in ("-x", "--x-offset"):
             xOffset = float(arg)
@@ -168,6 +169,8 @@ def main(argv):
             maxInfilIterations = int(arg)
         elif opt in ("--setup"):
             makeSetupFile = True
+        elif opt in ("--mirrored"):
+            mirrored = True
     
     correctedPaths = []
     for fileName in args:
@@ -271,7 +274,13 @@ def main(argv):
         for p in pp:
             pathsNodes[-1].append([])
             for n in p:
-                pathsNodes[-1][-1].append([n[0] - minX, n[1] - minY])
+                x = n[0]
+                y = n[1]
+                if mirrored:
+                    x = minX + maxX - x
+                    pathsNodes[-1][-1].append([y - minY, maxX - x])
+                else:
+                    pathsNodes[-1][-1].append([x - minX, y - minY])
 
     code = []
     code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\n')
