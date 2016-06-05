@@ -1,0 +1,5 @@
+[default]
+userScale=0.3533
+maxInfilIterations=1
+perRadius=0.19
+makeSetupFile=True
