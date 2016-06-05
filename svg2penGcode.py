@@ -19,7 +19,7 @@ def generateInfil(lineRing, penRadius, minPenRadius, maxIterations, side='left',
     if maxIterations == 0:
         return []
     try:
-        offset = lineRing.parallel_offset(penRadius, side, join_style=join_style, mitre_limit=10)
+        offset = lineRing.parallel_offset(penRadius, side, join_style=join_style, mitre_limit=10,resolution=16)
     except:
         return []
     parts = hasattr(offset, 'geoms') and offset or [offset]
@@ -41,7 +41,7 @@ def generateInfil(lineRing, penRadius, minPenRadius, maxIterations, side='left',
         if minX < min(ox) or minY < min(oy) or maxX > max(ox) or maxY > max(oy):
             # Make with right side
             try:
-                offset = lineRing.parallel_offset(penRadius, 'right', join_style=join_style, mitre_limit=10)
+                offset = lineRing.parallel_offset(penRadius, 'right', join_style=join_style, mitre_limit=10,resolution=16)
             except:
                 pass
             parts = hasattr(offset, 'geoms') and offset or [offset]
@@ -56,6 +56,7 @@ def generateInfil(lineRing, penRadius, minPenRadius, maxIterations, side='left',
     #         pass
     subparts = []
     for p in parts:
+        p = p.simplify(0.05)#(penRadius/4)
         subparts.append(p)
         subparts += generateInfil(p, penRadius/2.5, minPenRadius, maxIterations=maxIterations-1, side='left',join_style=join_style)
     return subparts
@@ -281,7 +282,13 @@ def main(argv):
                     pathsNodes[-1][-1].append([y - minY, maxX - x])
                 else:
                     pathsNodes[-1][-1].append([x - minX, y - minY])
-
+    if mirrored:
+        t = maxY
+        maxY = maxX
+        maxX = t
+        t = minY
+        minY = minX
+        minX = t
     code = []
     code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\n')
     code.append('G1 Z' + formatVal(zMove + zOffset + zApproach) + ';\n')
@@ -318,19 +325,18 @@ def main(argv):
     print 'PCB size ', formatVal(maxX - minX, f="%0.f"), formatVal(maxY - minY, f="%0.f")
 
     if makeSetupFile:
-        #Gen code for point pen to minX minY position with z offset 
-        code = []
-        code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\n')
-        code.append('G1 Z' + formatVal(zMove + zOffset + zApproach) + ';\n')
-        code.append('G1 X'+formatVal(xOffset)+' Y'+formatVal(yOffset)+' F'+formatVal(moveFeed)+';\n')
-        #This privents strange movement as the end
-        code.append('G1 X'+formatVal(xOffset+0.1)+' Y'+formatVal(yOffset+0.1)+';\n')
-        code.append('G1 X'+formatVal(xOffset)+' Y'+formatVal(yOffset)+';\n')
-        code.append('G1 Z' + formatVal(zOffset) + ';\n')
-        code.append('M84;\n;')
-        f = open(fileName+'.setup.gcode', 'w')
-        f.writelines(code)
-        f.close()
+        #Gen setup code for pointing to corners
+        targets = {'LB':[xOffset, yOffset], 'LT':[xOffset, yOffset+(maxY-minY)], 'RT':[xOffset+(maxX-minX), yOffset+(maxY-minY)], 'RB':[xOffset+(maxX-minX), yOffset]}
+        for k in targets:
+            code = []
+            code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\n')
+            code.append('G1 Z' + formatVal(zMove + zOffset + zApproach) + ';\n')
+            code.append('G1 X'+formatVal(targets[k][0])+' Y'+formatVal(targets[k][1])+' F'+formatVal(moveFeed)+';\n')
+            code.append('G1 Z' + formatVal(zOffset) + ';\n')
+            code.append('M84;\n;')
+            f = open(fileName+'.setup'+k+'.gcode', 'w')
+            f.writelines(code)
+            f.close()
         #Gen code for mark corners
         stroke = 2.0;
         cornerNodes = []
