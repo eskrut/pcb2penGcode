@@ -1,7 +1,8 @@
 #!python
 
-import sys
+import sys, os
 import getopt
+import ConfigParser
 import re
 from svg.path import Path, Line, Arc, CubicBezier, QuadraticBezier, parse_path
 from xml.dom import minidom
@@ -56,6 +57,8 @@ def generateInfil(lineRing, penRadius, minPenRadius, maxIterations, side='left',
     #         pass
     subparts = []
     for p in parts:
+        # if len(p.coords) > 2:
+        #p = LinearRing(p)
         subparts.append(p)
         subparts += generateInfil(p, penRadius/2.5, minPenRadius, maxIterations=maxIterations-1, side='left',join_style=join_style)
     return subparts
@@ -116,10 +119,56 @@ def main(argv):
     makeSetupFile = False
     insideFirst = False
     #Possible 1, 2, 3
-    jointStyle = 1;
-    maxInfilIterations = 50;
+    jointStyle = 1
+    maxInfilIterations = 50
     mirrored = False
-    #-s 0.3533 -x 20 -y 20 -z 4.5 -f 500
+
+    defs = {
+    'userScale':            str(userScale),
+    'penRadius':            str(penRadius),
+    'jointStyle':           str(jointStyle),
+    'maxInfilIterations':   str(maxInfilIterations),
+    'zDraw':                str(zDraw),
+    'zMove':                str(zMove),
+    'xOffset':              str(xOffset),
+    'yOffset':              str(yOffset),
+    'zOffset':              str(zOffset),
+    'zApproach':            str(zApproach),
+    'zRetreat':             str(zRetreat),
+    'feed':                 str(feed),
+    'moveFeed':             str(moveFeed),
+    'zMoveFeed':            str(zMoveFeed),
+    'minPenRadius':         str(minPenRadius),
+    'includeBorder':        str(includeBorder),
+    'numRepeatFirst':       str(numRepeatFirst),
+    'makeSetupFile':        str(makeSetupFile),
+    'insideFirst':          str(insideFirst),
+    'mirrored':             str(mirrored)
+    }
+
+    conf = ConfigParser.SafeConfigParser(defs)
+    conf.read(os.path.dirname(os.path.realpath(__file__))+'/config')
+    userScale = conf.getfloat('default', 'userScale')
+    penRadius = conf.getfloat('default', 'penRadius')
+    jointStyle = conf.getint('default', 'jointStyle')
+    maxInfilIterations = conf.getint('default', 'maxInfilIterations')
+    zDraw = conf.getfloat('default', 'zDraw')
+    zMove = conf.getfloat('default', 'zMove')
+    xOffset = conf.getfloat('default', 'xOffset')
+    yOffset = conf.getfloat('default', 'yOffset')
+    zOffset = conf.getfloat('default', 'zOffset')
+    zApproach = conf.getfloat('default', 'zApproach')
+    zRetreat = conf.getfloat('default', 'zRetreat')
+    feed = conf.getfloat('default', 'feed')
+    moveFeed = conf.getfloat('default', 'moveFeed')
+    zMoveFeed = conf.getfloat('default', 'zMoveFeed')
+    minPenRadius = conf.getfloat('default', 'minPenRadius')
+    includeBorder = conf.getboolean('default', 'includeBorder')
+    numRepeatFirst = conf.getint('default', 'numRepeatFirst')
+    makeSetupFile = conf.getboolean('default', 'makeSetupFile')
+    insideFirst = conf.getboolean('default', 'insideFirst')
+    mirrored = conf.getboolean('default', 'mirrored')
+
 
     helpString = 'svg2penGcode.py [options] <inputfile[s]>'
     try:
@@ -194,6 +243,8 @@ def main(argv):
                     rr = re.compile('M([-+]?[0-9]*\.?[0-9]*\s[-+]?[0-9]*\.?[0-9]*)')
                     ss = rr.search(paths[i])
                     paths[i] = paths[i].replace(ss.group(1), str(base[0]+rel[0]) + ' ' + str(base[1]+rel[1]))
+                    paths[i] = paths[i] + 'z'
+                    base = [base[0]+rel[0], base[1]+rel[1]]
                 pathstrings.append(paths)
             else:
                 pathstrings.append([path])
