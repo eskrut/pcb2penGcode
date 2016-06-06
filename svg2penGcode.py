@@ -14,6 +14,10 @@ from pprint import pprint
 
 def formatVal(val, f="%0.2f"):
     return (f % (val))
+def cmp_start_node(path1, path2):
+    x1, y1 = path1.xy
+    x2, y2 = path2.xy
+    return x1[0] < x2[0]
 def generateInfil(lineRing, penRadius, minPenRadius, maxIterations, side='left', join_style=2):
     if penRadius < minPenRadius:
         penRadius = minPenRadius
@@ -24,6 +28,7 @@ def generateInfil(lineRing, penRadius, minPenRadius, maxIterations, side='left',
     except:
         return []
     parts = hasattr(offset, 'geoms') and offset or [offset]
+    parts = sorted(parts, cmp=cmp_start_node)
     # Check if infil generated in right side. If not bounds of infil will be wider than bounds of original
     minX = minY = 1e10
     maxX = maxY = -1e10
@@ -71,7 +76,7 @@ def generatePathes(borderNodes, penRadius, minPenRadius, maxIterations=2, includ
     if includeBorder:
         paths = [l] + offsets
     else:
-        paths =  offsets
+        paths = offsets
     if insideFirst:
         return list(reversed(paths))
     else:
@@ -99,6 +104,8 @@ def printProgress (iteration, total, prefix = '', suffix = '', decimals = 2, bar
     sys.stdout.flush()
     if iteration == total:
         print("\n")
+def getDistance(node1, node2):
+    return math.sqrt((node1[0] - node2[0])**2 + (node1[1] - node2[1])**2)
 
 
 def main(argv):
@@ -344,6 +351,7 @@ def main(argv):
     code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\n')
     code.append('G1 Z' + formatVal(zMove + zOffset + zApproach) + ';\n')
     count = 0
+    lastNode = None
     for nodesGroup in pathsNodes:
         printProgress(count, len(pathsNodes), prefix='Generating')
         if len(nodesGroup) > 1:
