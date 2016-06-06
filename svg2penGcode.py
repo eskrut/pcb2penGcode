@@ -113,7 +113,7 @@ def main(argv):
     feed = 500
     moveFeed = 1000
     zMoveFeed = 120
-    penRadius = 0.19
+    penRadius = 0.15
     minPenRadius = 0.1
     includeBorder = False
     numRepeatFirst = 3

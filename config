@@ -1,5 +1,8 @@
 [default]
 userScale=0.3533
-maxInfilIterations=1
-perRadius=0.19
+maxInfilIterations=50
+perRadius=0.14
 makeSetupFile=True
+xOffset=70
+yOffset=50
+zOffset=2.4
