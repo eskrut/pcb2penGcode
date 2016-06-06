@@ -351,6 +351,8 @@ def main(argv):
         else:
             maxIter = maxInfilIterations
         for nodes in nodesGroup:
+            if len(nodes) == 0:
+                continue
             offsets = generatePathes(nodes, penRadius, maxIterations=maxIter, includeBorder=includeBorder, minPenRadius=minPenRadius, insideFirst=insideFirst, jointStyle=jointStyle)
             if len(offsets) > numRepeatFirst:
                 offsets = [offsets[:numRepeatFirst]] + offsets
