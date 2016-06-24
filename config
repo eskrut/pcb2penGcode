@@ -1,9 +1,13 @@
 [default]
 userScale=0.3533
 maxInfilIterations=50
-perRadius=0.14
+penRadius=0.25
 makeSetupFile=True
-xOffset=70
-yOffset=50
-zOffset=2.4
+xOffset=24
+yOffset=27
+zOffset=37
+zMove=1.0
+zDraw=-0.5
+zApproach=15
+zRetreat=15
 feed=600
