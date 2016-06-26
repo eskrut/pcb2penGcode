@@ -190,7 +190,11 @@ class SVGProcessor(object):
             for path in paths:
                 descr = path.getAttribute("d")
                 p = parse_path(descr)
-                length = p.length()*self.scalefactor
+                try:
+                    length = p.length()*self.scalefactor
+                except:
+                    print p
+                    continue
                 numCheckPoints = length*3/penRadius
                 points = []
                 cs = [0.0]
