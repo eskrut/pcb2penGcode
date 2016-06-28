@@ -1,14 +1,21 @@
 from xml.dom import minidom
 import numpy as np
 import re
+import math
 from svg.path import Path, Line, Arc, CubicBezier, QuadraticBezier, parse_path
 from shapely.geometry import LineString
 from shapely.geometry import LinearRing
 
+def isNodesEqual(node1, node2, toleranse):
+    if math.sqrt((node1[0] - node2[0])**2 + (node1[1] - node2[1])**2) < toleranse:
+        return True
+    return False
 def cmp_start_node(path1, path2):
     x1, y1 = path1.xy
     x2, y2 = path2.xy
     return x1[0] < x2[0]
+def cmp_start_node_pad_y(pad1, pad2):
+    return float(pad1.penPaths[0][0][1]) < float(pad2.penPaths[0][0][1])
 def generateInfil(lineRing, penRadius, side='right', join_style=2):
     try:
         offset = lineRing.parallel_offset(penRadius, side, join_style=join_style, mitre_limit=10,resolution=16)
@@ -187,13 +194,19 @@ class SVGProcessor(object):
                 sWidth = 0.0
             paths = g.getElementsByTagName("path")
             polylines = g.getElementsByTagName("polyline")
+            circles = g.getElementsByTagName("circle")
             for path in paths:
                 descr = path.getAttribute("d")
                 p = parse_path(descr)
                 try:
                     length = p.length()*self.scalefactor
                 except:
-                    print p
+                    point = p.point(0)*self.scalefactor
+                    cx, cy = round(point.real, 2), round(point.imag, 2)
+                    nodes = []
+                    for fi in np.arange(0, 2*math.pi, math.pi/30):
+                        nodes.append([cx + (sWidth/2)*math.cos(fi), cy + (sWidth/2)*math.sin(fi)])
+                    self.entryes.append(AreaToFill(nodes, sWidth, penRadius))
                     continue
                 numCheckPoints = length*3/penRadius
                 points = []
@@ -213,6 +226,17 @@ class SVGProcessor(object):
                     if len(p) == 2:
                         nodes.append([round(float(p[0])*self.scalefactor, 1), round(float(p[1])*self.scalefactor, 1)])
                 self.entryes.append(AreaToFill(nodes, sWidth, penRadius))
+            for circle in circles:
+                cx = round(float(circle.getAttribute("cx"))*self.scalefactor, 1)
+                cy = round(float(circle.getAttribute("cy"))*self.scalefactor, 1)
+                r  = round(float(circle.getAttribute("r") )*self.scalefactor, 1)
+                nodes = []
+                for fi in np.arange(0, 2*math.pi, math.pi/30):
+                    nodes.append([cx + (r+sWidth)*math.cos(fi), cy + (r+sWidth)*math.sin(fi)])
+                if fill == 1:
+                    self.entryes.append(AreaToFill(nodes, sWidth, penRadius))
+                else:
+                    self.entryes.append(Track(nodes, sWidth, penRadius))
     def process(self, mirrored):
         minX = []
         maxX = []
@@ -238,6 +262,59 @@ class SVGProcessor(object):
             tmp = self.maxX
             self.maxX = self.maxY
             self.maxY = tmp
+        tracks = []
+        pads = []
+        for e in self.entryes:
+            if isinstance(e, Track):
+                tracks.append([e])
+            elif isinstance(e, AreaToFill):
+                pads.append(e)
+            else:
+                raise NotImplemented
+        isModified = True
+        while isModified:
+            isModified = False
+            for ct1 in range(len(tracks)-1):
+                for ct2 in range(ct1, len(tracks)):
+                    seq1 = tracks[ct1]
+                    seq2 = tracks[ct2]
+                    if isNodesEqual(seq1[-1].penPaths[-1][-1], seq2[0].penPaths[0][0], self.penRadius/2):
+                        tracks[ct1] += tracks[ct2]
+                        tracks.pop(ct2)
+                        isModified = True
+                        break
+                    elif isNodesEqual(seq1[0].penPaths[0][0], seq2[-1].penPaths[-1][-1], self.penRadius/2):
+                        tracks[ct1] = tracks[ct2] + tracks[ct1]
+                        tracks.pop(ct2)
+                        isModified = True
+                        break
+                if isModified:
+                    break
+        width, height = self.PCBSize()
+        sortedPads = []
+        wStep = width/6
+        for startBond in np.arange(0, width, wStep):
+            subPads = []
+            unsortedPads = []
+            for p in pads:
+                px = p.penPaths[0][0][0]
+                py = p.penPaths[0][0][1]
+                if startBond <= px and px < startBond + wStep:
+                    if len(subPads) > 0:
+                        subPads += [p]
+                    else:
+                        subPads = [p]
+                else:
+                    unsortedPads += [p]
+            pads = unsortedPads
+            subPads = sorted(subPads, cmp=cmp_start_node_pad_y)
+            sortedPads += subPads
+        pads = sortedPads
+        self.entryes = []
+        for t in tracks:
+            self.entryes += t
+        for p in pads:
+            self.entryes += [p]
     def PCBSize(self):
         return self.maxX - self.minX + 2*self.penRadius, self.maxY - self.minY + 2*self.penRadius
     def penPaths(self):
