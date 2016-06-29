@@ -56,6 +56,7 @@ def main(argv):
     jointStyle = 1
     maxInfilIterations = 50
     mirrored = False
+    mergeTracks = False
 
     defs = {
     'userScale':            str(userScale),
@@ -77,7 +78,8 @@ def main(argv):
     'numRepeatFirst':       str(numRepeatFirst),
     'makeSetupFile':        str(makeSetupFile),
     'insideFirst':          str(insideFirst),
-    'mirrored':             str(mirrored)
+    'mirrored':             str(mirrored),
+    'mergeTracks':          str(mergeTracks)
     }
 
     conf = ConfigParser.SafeConfigParser(defs)
@@ -102,13 +104,14 @@ def main(argv):
     makeSetupFile = conf.getboolean('default', 'makeSetupFile')
     insideFirst = conf.getboolean('default', 'insideFirst')
     mirrored = conf.getboolean('default', 'mirrored')
+    mergeTracks = conf.getboolean('default', 'mergeTracks')
 
 
     helpString = 'svg2penGcode.py [options] <inputfile[s]>'
     try:
         opts, args = getopt.getopt(argv,"hp:d:m:x:y:z:s:f:b",["help",
             "pen-radius=", "min-pen-radius=", "draw=", "move=",
-            "x-offset=", "y-offset=", "z-offset=", "scale=", "mirrored",
+            "x-offset=", "y-offset=", "z-offset=", "scale=", "mirrored", "merge-tracks",
             "feed=", "feed-move=",
             "border", "repeat=", "inside-first",
             "join-style=", "max-iterations=",
@@ -154,11 +157,15 @@ def main(argv):
             makeSetupFile = True
         elif opt in ("--mirrored"):
             mirrored = True
+        elif opt in ("--merge-tracks"):
+            mergeTracks = True
+        else:
+            raise RuntimeError("Unknown option:" + opt)
     
     fileName = args[0]
     parcer = SVGProcessor()
     parcer.parce(fileName, penRadius)
-    parcer.process(mirrored)
+    parcer.process(mirrored, mergeTracks)
     code = []
     code.append('G21;\nG90;\nG28 X0 Y0;\nG28 Z0;\n')
     code.append('G1 Z' + formatVal(zMove + zOffset + zApproach) + ';\n')

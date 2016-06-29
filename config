@@ -1,13 +1,13 @@
 [default]
-penRadius=0.4
+penRadius=0.45
 makeSetupFile=True
 xOffset=24
 yOffset=27
 zOffset=36.5
 zMove=1.5
-zDraw=-3
+zDraw=-0.7
 zApproach=15
 zRetreat=15
-feed=1200
+feed=800
 moveFeed=1200
 zMoveFeed=400

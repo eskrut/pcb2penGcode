@@ -8,8 +8,10 @@ from shapely.geometry import LinearRing
 from shapely.geometry import Point
 from sets import Set
 
+def getDistance(node1, node2):
+    return math.sqrt((node1[0] - node2[0])**2 + (node1[1] - node2[1])**2)
 def isNodesEqual(node1, node2, toleranse):
-    if math.sqrt((node1[0] - node2[0])**2 + (node1[1] - node2[1])**2) < toleranse:
+    if getDistance(node1, node2) < toleranse:
         return True
     return False
 def oppositeEnd(end):
@@ -151,7 +153,7 @@ class AreaToFill(PCBEntry):
         infill = generateInfil(line, self.penRadius)
         if len(infill) == 0:
             print "failed to process infill. will try with smaller radius"
-            for c in reversed(np.arange(self.penRadius*0.5, self.penRadius*0.9, self.penRadius*0.05)):
+            for c in reversed(np.arange(self.penRadius*0.5, self.penRadius*0.9, self.penRadius*0.01)):
                 infill = generateInfil(line, c)
                 if len(infill) > 0:
                     print "Success with penRadius factor of", c/self.penRadius
@@ -189,9 +191,9 @@ class SubPath(object):
             if self.nextSubPaths[ctP].checkAndRegister(ct, objects, toleranse):
                 return True
         return False
-    def getPenPaths(self, tracks):
+    def getPenPaths(self, tracks, backwardMoveAllowed=True):
         thisPaths = np.empty([0,2])
-        subPaths = np.empty([0,2])
+        subPaths = [np.empty([0,2])]
         for t in self.path:
             thisCollides = []
             for c in self.collides:
@@ -211,9 +213,19 @@ class SubPath(object):
             if t[1] == 1:
                 trackPaths = trackPaths[::-1]
             thisPaths = np.append(thisPaths, trackPaths, axis=0)
-        for sp in self.nextSubPaths:
-            subPaths = np.append(subPaths, sp.getPenPaths(tracks), axis=0)
-        rez = np.append(np.append(thisPaths, subPaths, axis=0), thisPaths[::-1], axis=0)
+        if backwardMoveAllowed:
+            for sp in self.nextSubPaths:
+                subPaths[0] = np.append(subPaths[0], sp.getPenPaths(tracks, backwardMoveAllowed)[0], axis=0)
+            rez = [np.append(np.append(thisPaths, subPaths[0], axis=0), thisPaths[::-1], axis=0)]
+        else:
+            subPaths = []
+            for sp in self.nextSubPaths:
+                subPaths += sp.getPenPaths(tracks, backwardMoveAllowed)
+            rez = [thisPaths]
+            if len(subPaths):
+                rez = [np.append(rez[0], subPaths[0], axis=0)]
+                if len(subPaths) > 1:
+                    rez += subPaths[1:]
         return rez
     def __str__(self):
         s = "start:"+str(self.start) + "\npath:" + str(self.path) + "\nstop:" + str(self.stop) + "\n"
@@ -229,7 +241,8 @@ def generateSubPath(pathID, start):
     last = p.start
     while len(connectedTracks[pathID]) > 0:
         p.path.append(last)
-        connectedTracks[pathID].remove(last[0])
+        #some BUG here :( but works fine
+        # connectedTracks[pathID].remove(last[0])
         connectedTo = tracksConnectDict.get(oppositeEnd(last), [])
         if len(connectedTo) == 1:
             last = connectedTo[0]
@@ -254,6 +267,7 @@ class SVGProcessor(object):
         self.scale = [1.0, 1.0]
         self.scalefactor = 1.0
         self.entryes = []
+        self.allPaths = []
     def parce(self, fileName, penRadius):
         self.penRadius = penRadius
         doc = minidom.parse(fileName)
@@ -344,7 +358,7 @@ class SVGProcessor(object):
                     self.entryes.append(AreaToFill(nodes, sWidth, penRadius))
                 else:
                     self.entryes.append(Track(nodes, sWidth, penRadius))
-    def process(self, mirrored):
+    def process(self, mirrored, mergeTracks=True):
         global connectedTracks
         global tracksConnectDict
         minX = []
@@ -381,78 +395,83 @@ class SVGProcessor(object):
             else:
                 raise NotImplemented
 
-        #Merge connected tracks
-        tracksConnectivity = []
-        tracksConnectDict = dict()
-        for ct1 in range(len(tracks)-1):
-            ends1 = tracks[ct1].ends()
-            for ct2 in range(ct1+1, len(tracks)):
-                ends2 = tracks[ct2].ends()
-                if isNodesEqual(ends1[0], ends2[0], self.penRadius/2):
-                    tracksConnectivity.append((ct1, ct2, 0, 0))
-                    tracksConnectDict[(ct1, 0)] = tracksConnectDict.get((ct1, 0), []) + [(ct2, 0)]
-                    tracksConnectDict[(ct2, 0)] = tracksConnectDict.get((ct2, 0), []) + [(ct1, 0)]
-                elif isNodesEqual(ends1[0], ends2[1], self.penRadius/2):
-                    tracksConnectivity.append((ct1, ct2, 0, 1))
-                    tracksConnectDict[(ct1, 0)] = tracksConnectDict.get((ct1, 0), []) + [(ct2, 1)]
-                    tracksConnectDict[(ct2, 1)] = tracksConnectDict.get((ct2, 1), []) + [(ct1, 0)]
-                elif isNodesEqual(ends1[1], ends2[0], self.penRadius/2):
-                    tracksConnectivity.append((ct1, ct2, 1, 0))
-                    tracksConnectDict[(ct1, 1)] = tracksConnectDict.get((ct1, 1), []) + [(ct2, 0)]
-                    tracksConnectDict[(ct2, 0)] = tracksConnectDict.get((ct2, 0), []) + [(ct1, 1)]
-                elif isNodesEqual(ends1[1], ends2[1], self.penRadius/2):
-                    tracksConnectivity.append((ct1, ct2, 1, 1))
-                    tracksConnectDict[(ct1, 1)] = tracksConnectDict.get((ct1, 1), []) + [(ct2, 1)]
-                    tracksConnectDict[(ct2, 1)] = tracksConnectDict.get((ct2, 1), []) + [(ct1, 1)]
-        connectedTracks = []
-        for conn in tracksConnectivity:
-            connectedTracks.append(Set([conn[0], conn[1]]))
-        modified = True
-        while modified:
-            modified = False
-            for ct1 in range(len(connectedTracks)-1):
-                for ct2 in range(ct1+1, len(connectedTracks)):
-                    if len(connectedTracks[ct1] & connectedTracks[ct2]) > 0:
-                        connectedTracks[ct1] = connectedTracks[ct1] | connectedTracks[ct2]
-                        modified = True
-                        connectedTracks.pop(ct2)
+        if mergeTracks:
+            #Merge connected tracks
+            tracksConnectivity = []
+            tracksConnectDict = dict()
+            for ct1 in range(len(tracks)-1):
+                ends1 = tracks[ct1].ends()
+                for ct2 in range(ct1+1, len(tracks)):
+                    ends2 = tracks[ct2].ends()
+                    if isNodesEqual(ends1[0], ends2[0], self.penRadius/2):
+                        tracksConnectivity.append((ct1, ct2, 0, 0))
+                        tracksConnectDict[(ct1, 0)] = tracksConnectDict.get((ct1, 0), []) + [(ct2, 0)]
+                        tracksConnectDict[(ct2, 0)] = tracksConnectDict.get((ct2, 0), []) + [(ct1, 0)]
+                    elif isNodesEqual(ends1[0], ends2[1], self.penRadius/2):
+                        tracksConnectivity.append((ct1, ct2, 0, 1))
+                        tracksConnectDict[(ct1, 0)] = tracksConnectDict.get((ct1, 0), []) + [(ct2, 1)]
+                        tracksConnectDict[(ct2, 1)] = tracksConnectDict.get((ct2, 1), []) + [(ct1, 0)]
+                    elif isNodesEqual(ends1[1], ends2[0], self.penRadius/2):
+                        tracksConnectivity.append((ct1, ct2, 1, 0))
+                        tracksConnectDict[(ct1, 1)] = tracksConnectDict.get((ct1, 1), []) + [(ct2, 0)]
+                        tracksConnectDict[(ct2, 0)] = tracksConnectDict.get((ct2, 0), []) + [(ct1, 1)]
+                    elif isNodesEqual(ends1[1], ends2[1], self.penRadius/2):
+                        tracksConnectivity.append((ct1, ct2, 1, 1))
+                        tracksConnectDict[(ct1, 1)] = tracksConnectDict.get((ct1, 1), []) + [(ct2, 1)]
+                        tracksConnectDict[(ct2, 1)] = tracksConnectDict.get((ct2, 1), []) + [(ct1, 1)]
+            connectedTracks = []
+            for conn in tracksConnectivity:
+                connectedTracks.append(Set([conn[0], conn[1]]))
+            modified = True
+            while modified:
+                modified = False
+                for ct1 in range(len(connectedTracks)-1):
+                    for ct2 in range(ct1+1, len(connectedTracks)):
+                        if len(connectedTracks[ct1] & connectedTracks[ct2]) > 0:
+                            connectedTracks[ct1] = connectedTracks[ct1] | connectedTracks[ct2]
+                            modified = True
+                            connectedTracks.pop(ct2)
+                            break
+                    if modified:
                         break
-                if modified:
-                    break
-        endsMap = []
-        for seq in connectedTracks:
-            endsMap.append(dict())
-            for s in seq:
-                for conn in tracksConnectivity:
-                    if conn[0] == s:
-                        endsMap[-1][(conn[0], conn[2])] = endsMap[-1].get((conn[0], conn[2]), 0) + 1
-                    if conn[1] == s:
-                        endsMap[-1][(conn[1], conn[3])] = endsMap[-1].get((conn[1], conn[3]), 0) + 1
-        freeEnds = []
-        for seq in connectedTracks:
-            freeEnds.append([])
-            for s in seq:
-                freeEnds[-1].append((s, 0))
-                freeEnds[-1].append((s, 1))
-        for conn in tracksConnectivity:
-            for ct in range(len(freeEnds)):
-                if freeEnds[ct].count((conn[0], conn[2])):
-                    freeEnds[ct].remove((conn[0], conn[2]))
-                if freeEnds[ct].count((conn[1], conn[3])):
-                    freeEnds[ct].remove((conn[1], conn[3]))
-        self.allPaths = []
-        for pathID in range(len(connectedTracks)):
-            end = freeEnds[pathID][0]
-            p = generateSubPath(pathID, end)
-            self.allPaths.append(p)
-        
-        #Merge hanging tracks and pads
-        
-        #.... Mmmm...
-        tracks +=pads
-        hangingObjectsIDs = []
-        for ct in range(len(tracks)):
-            if (not tracksConnectDict.has_key((ct, 0))) and (not tracksConnectDict.has_key((ct, 1))):
+            endsMap = []
+            for seq in connectedTracks:
+                endsMap.append(dict())
+                for s in seq:
+                    for conn in tracksConnectivity:
+                        if conn[0] == s:
+                            endsMap[-1][(conn[0], conn[2])] = endsMap[-1].get((conn[0], conn[2]), 0) + 1
+                        if conn[1] == s:
+                            endsMap[-1][(conn[1], conn[3])] = endsMap[-1].get((conn[1], conn[3]), 0) + 1
+            freeEnds = []
+            for seq in connectedTracks:
+                freeEnds.append([])
+                for s in seq:
+                    freeEnds[-1].append((s, 0))
+                    freeEnds[-1].append((s, 1))
+            for conn in tracksConnectivity:
+                for ct in range(len(freeEnds)):
+                    if freeEnds[ct].count((conn[0], conn[2])):
+                        freeEnds[ct].remove((conn[0], conn[2]))
+                    if freeEnds[ct].count((conn[1], conn[3])):
+                        freeEnds[ct].remove((conn[1], conn[3]))
+            for pathID in range(len(connectedTracks)):
+                end = freeEnds[pathID][0]
+                p = generateSubPath(pathID, end)
+                self.allPaths.append(p)
+            
+            #Merge hanging tracks and pads
+            
+            #.... Mmmm...
+            tracks +=pads
+            hangingObjectsIDs = []
+            for ct in range(len(tracks)):
+                if (not tracksConnectDict.has_key((ct, 0))) and (not tracksConnectDict.has_key((ct, 1))):
+                    hangingObjectsIDs.append(ct)
+        else:
+            tracks +=pads
+            hangingObjectsIDs = []
+            for ct in range(len(tracks)):
                 hangingObjectsIDs.append(ct)
 
         stillHangingObjectsIDs = []
@@ -474,11 +493,32 @@ class SVGProcessor(object):
         
     def PCBSize(self):
         return self.maxX - self.minX + 2*self.penRadius, self.maxY - self.minY + 2*self.penRadius
-    def penPaths(self):
+    def penPaths(self, backwardMoveAllowed=False):
         allPaths = []
         for sp in self.allPaths:
-            allPaths.append(sp.getPenPaths(self.tracks))
-        return allPaths
+            allPaths += sp.getPenPaths(self.tracks, backwardMoveAllowed)
+        sortedPaths = []
+        sortedPaths += [allPaths.pop(0)]
+        for ct in range(len(allPaths)):
+            index = None
+            minDistance = 1e10
+            direction = True
+            for count in range(len(allPaths)):
+                d1 = getDistance(sortedPaths[-1][-1], allPaths[count][0])
+                if d1 < minDistance:
+                    minDistance = d1
+                    index = count
+                    direction = True
+                d2 = getDistance(sortedPaths[-1][-1], allPaths[count][-1])
+                if d2 < minDistance:
+                    minDistance = d2
+                    index = count
+                    direction = False
+            path = allPaths.pop(index)
+            if not direction:
+                path = path[::-1]
+            sortedPaths += [path]
+        return sortedPaths
         
 if __name__ == "__main__":
     parcer = SVGProcessor()
