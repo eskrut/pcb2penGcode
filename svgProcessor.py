@@ -189,6 +189,32 @@ class SubPath(object):
             if self.nextSubPaths[ctP].checkAndRegister(ct, objects, toleranse):
                 return True
         return False
+    def getPenPaths(self, tracks):
+        thisPaths = np.empty([0,2])
+        subPaths = np.empty([0,2])
+        for t in self.path:
+            thisCollides = []
+            for c in self.collides:
+                if c[0] == t[0]:
+                    thisCollides.append(c)
+            trackPaths = tracks[t[0]].penPaths
+            thisCollides.sort(key=lambda c: c[2][0][2], reverse=True)
+            for c in thisCollides:
+                sPaths = tracks[c[1]].penPaths[0]
+                for p in tracks[c[1]].penPaths[1:]:
+                    sPaths = np.append(sPaths, p, axis=0)
+                trackPaths[c[2][0][1]] = np.insert(trackPaths[c[2][0][1]], [c[2][0][2]], sPaths, axis=0)
+            paths = trackPaths[0]
+            for p in trackPaths[1:]:
+                paths = np.append(paths, p, axis=0)
+            trackPaths = paths
+            if t[1] == 1:
+                trackPaths = trackPaths[::-1]
+            thisPaths = np.append(thisPaths, trackPaths, axis=0)
+        for sp in self.nextSubPaths:
+            subPaths = np.append(subPaths, sp.getPenPaths(tracks), axis=0)
+        rez = np.append(np.append(thisPaths, subPaths, axis=0), thisPaths[::-1], axis=0)
+        return rez
     def __str__(self):
         s = "start:"+str(self.start) + "\npath:" + str(self.path) + "\nstop:" + str(self.stop) + "\n"
         s += "subPaths:" + str(len(self.nextSubPaths)) + "\n"
@@ -429,7 +455,7 @@ class SVGProcessor(object):
             if (not tracksConnectDict.has_key((ct, 0))) and (not tracksConnectDict.has_key((ct, 1))):
                 hangingObjectsIDs.append(ct)
 
-        stillHangingObjects = []
+        stillHangingObjectsIDs = []
         for ct in hangingObjectsIDs:
             found = False
             for sp in self.allPaths:
@@ -437,17 +463,22 @@ class SVGProcessor(object):
                     found = True
                     break
             if not found:
-                stillHangingObjects.append(tracks[ct])
-        for ho in stillHangingObjects:
-            print ho
+                stillHangingObjectsIDs.append(ct)
+        self.tracks = tracks
+        for sho in stillHangingObjectsIDs:
+            p=SubPath()
+            p.start=(sho, 0)
+            p.path.append(p.start)
+            p.stop=oppositeEnd(p.start)
+            self.allPaths.append(p)
         
     def PCBSize(self):
         return self.maxX - self.minX + 2*self.penRadius, self.maxY - self.minY + 2*self.penRadius
     def penPaths(self):
-        # allPaths = []
-        # for e in self.entryes:
-        #     allPaths += e.penPaths
-        return self.allPaths
+        allPaths = []
+        for sp in self.allPaths:
+            allPaths.append(sp.getPenPaths(self.tracks))
+        return allPaths
         
 if __name__ == "__main__":
     parcer = SVGProcessor()
